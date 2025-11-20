@@ -12,8 +12,7 @@ A simple To-Do List application where users can:
 - HTML  
 - CSS  
 - JavaScript  
-  or  
-- React + TailwindCSS *(choose based on your project)*
+  
 
 ## 🚀 Live Demo
 (mellifluous-palmier-82c5b5.netlify.app)

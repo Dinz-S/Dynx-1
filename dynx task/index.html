@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dnyx task — Vanilla JS</title>
+  <style>
+    :root{--bg:#f6f8fa;--card:#fff;--accent:#0ea5e9;--muted:#6b7280}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;background:var(--bg);padding:28px}
+    .app{max-width:720px;margin:0 auto;background:var(--card);padding:20px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,.08)}
+    h1{margin:0 0 8px;font-size:20px}
+    .meta{color:var(--muted);font-size:13px;margin-bottom:16px}
+    form{display:flex;gap:8px;margin-bottom:12px}
+    input[type="text"]{flex:1;padding:10px;border:1px solid #e6e9ef;border-radius:8px;font-size:14px}
+    button{padding:10px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+    .filters{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .filter-btn{background:#f3f4f6;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:#374151}
+    .filter-btn.active{background:var(--accent);color:#fff}
+    ul.tasks{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+    li.task{display:flex;align-items:center;justify-content:space-between;padding:10px;border:1px solid #eef2f7;border-radius:10px}
+    .left{display:flex;gap:10px;align-items:center;flex:1}
+    .title{font-size:15px}
+    .title.completed{text-decoration:line-through;color:#9ca3af}
+    .actions{display:flex;gap:6px}
+    .small-btn{background:transparent;border:0;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px}
+    .small-btn:hover{background:#f3f4f6}
+    .counts{margin-top:12px;color:var(--muted);font-size:13px;display:flex;justify-content:space-between;align-items:center}
+    .empty{padding:20px;text-align:center;color:var(--muted)}
+    @media (max-width:520px){.app{padding:14px}button,input[type="text"]{font-size:14px}}
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-labelledby="app-title">
+    <h1 id="app-title">Dnyx Task</h1>
+    <div class="meta">Add, edit, delete & persist tasks locally (localStorage)</div>
+
+    <form id="task-form" aria-label="Add task">
+      <input id="task-input" type="text" placeholder="What needs to be done?" autofocus autocomplete="off" />
+      <button type="submit">Add</button>
+    </form>
+
+    <div class="filters" role="tablist" aria-label="Filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="active">Active</button>
+      <button class="filter-btn" data-filter="completed">Completed</button>
+      <div style="flex:1"></div>
+      <button class="small-btn" id="clear-completed">Clear completed</button>
+      <button class="small-btn" id="clear-all">Clear all</button>
+    </div>
+
+    <ul id="tasks" class="tasks" aria-live="polite"></ul>
+
+    <div class="counts">
+      <div id="counts-text">0 total • 0 active • 0 completed</div>
+      <div class="muted" id="hint" style="color:var(--muted);font-size:13px"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const STORAGE_KEY = 'dnyx-tasks-v1'
+  const form = document.getElementById('task-form')
+  const input = document.getElementById('task-input')
+  const tasksEl = document.getElementById('tasks')
+  const filters = document.querySelectorAll('.filter-btn')
+  const clearCompletedBtn = document.getElementById('clear-completed')
+  const clearAllBtn = document.getElementById('clear-all')
+  const countsText = document.getElementById('counts-text')
+
+  let tasks = []
+  let filter = 'all' // all | active | completed
+
+  // --- persistence ---
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      tasks = raw ? JSON.parse(raw) : []
+    } catch (e) {
+      console.error('Failed to load tasks', e)
+      tasks = []
+    }
+  }
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
+  }
+
+  // --- utilities ---
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2,8)
+  }
+
+  function counts() {
+    const total = tasks.length
+    const completed = tasks.filter(t => t.completed).length
+    const active = total - completed
+    return { total, active, completed }
+  }
+
+  // --- rendering ---
+  function render() {
+    // filter tasks
+    let list = tasks.slice()
+    if (filter === 'active') list = list.filter(t => !t.completed)
+    if (filter === 'completed') list = list.filter(t => t.completed)
+
+    tasksEl.innerHTML = ''
+    if (!list.length) {
+      tasksEl.innerHTML = '<li class="empty">No tasks — add one above</li>'
+    } else {
+      for (const task of list) {
+        const li = document.createElement('li')
+        li.className = 'task'
+        li.dataset.id = task.id
+
+        const left = document.createElement('div')
+        left.className = 'left'
+
+        const checkbox = document.createElement('input')
+        checkbox.type = 'checkbox'
+        checkbox.checked = !!task.completed
+        checkbox.setAttribute('aria-label','Toggle complete')
+        checkbox.addEventListener('change', () => {
+          toggleComplete(task.id)
+        })
+
+        const title = document.createElement('div')
+        title.className = 'title' + (task.completed ? ' completed' : '')
+        title.textContent = task.title
+        title.title = 'Double-click to edit'
+        // inline edit on double click
+        title.addEventListener('dblclick', () => startInlineEdit(li, task))
+
+        left.appendChild(checkbox)
+        left.appendChild(title)
+
+        const actions = document.createElement('div')
+        actions.className = 'actions'
+
+        const editBtn = document.createElement('button')
+        editBtn.className = 'small-btn'
+        editBtn.textContent = 'Edit'
+        editBtn.addEventListener('click', () => startInlineEdit(li, task))
+
+        const delBtn = document.createElement('button')
+        delBtn.className = 'small-btn'
+        delBtn.textContent = 'Delete'
+        delBtn.style.color = '#dc2626'
+        delBtn.addEventListener('click', () => {
+          if (confirm('Delete this task?')) removeTask(task.id)
+        })
+
+        actions.appendChild(editBtn)
+        actions.appendChild(delBtn)
+
+        li.appendChild(left)
+        li.appendChild(actions)
+
+        tasksEl.appendChild(li)
+      }
+    }
+
+    const c = counts()
+    countsText.textContent = `${c.total} total • ${c.active} active • ${c.completed} completed`
+    save()
+  }
+
+  // --- operations ---
+  function addTask(title) {
+    const trimmed = (title || '').trim()
+    if (!trimmed) return
+    tasks.unshift({ id: uid(), title: trimmed, completed: false })
+    render()
+  }
+
+  function removeTask(id) {
+    tasks = tasks.filter(t => t.id !== id)
+    render()
+  }
+
+  function toggleComplete(id) {
+    tasks = tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t)
+    render()
+  }
+
+  function updateTask(id, newTitle) {
+    tasks = tasks.map(t => t.id === id ? { ...t, title: newTitle } : t)
+    render()
+  }
+
+  function clearCompleted() {
+    if (!confirm('Remove all completed tasks?')) return
+    tasks = tasks.filter(t => !t.completed)
+    render()
+  }
+
+  function clearAll() {
+    if (!confirm('Clear ALL tasks?')) return
+    tasks = []
+    render()
+  }
+
+  // --- inline edit helper ---
+  function startInlineEdit(li, task) {
+    // replace title with input
+    const titleEl = li.querySelector('.title')
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.value = task.title
+    input.style.flex = '1'
+    input.style.padding = '6px 8px'
+    input.style.borderRadius = '8px'
+    input.style.border = '1px solid #e6e9ef'
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        finish()
+      } else if (e.key === 'Escape') {
+        cancel()
+      }
+    })
+    // focus and select
+    setTimeout(() => input.focus() && input.select(), 0)
+
+    function finish() {
+      const v = input.value.trim()
+      if (v) updateTask(task.id, v)
+      else if (confirm('Empty title — delete task?')) removeTask(task.id)
+    }
+    function cancel() {
+      render()
+    }
+
+    input.addEventListener('blur', () => { finish() })
+
+    // swap
+    titleEl.replaceWith(input)
+  }
+
+  // --- events ---
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    addTask(input.value)
+    input.value = ''
+    input.focus()
+  })
+
+  filters.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filters.forEach(b => b.classList.remove('active'))
+      btn.classList.add('active')
+      filter = btn.dataset.filter
+      render()
+    })
+  })
+
+  clearCompletedBtn.addEventListener('click', clearCompleted)
+  clearAllBtn.addEventListener('click', clearAll)
+
+  // --- init ---
+  load()
+  render()
+})();
+</script>
+</body>
+</html>
